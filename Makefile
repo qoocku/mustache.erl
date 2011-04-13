@@ -1,12 +1,10 @@
-ERL          ?= erl
-EBIN_DIRS    := $(wildcard deps/*/ebin)
+all: compile 
 
-all: erl
+compile:
+	@./rebar compile
 
-erl:
-	@$(ERL) -pa $(EBIN_DIRS) -noinput +B \
-	  -eval 'case make:all() of up_to_date -> halt(0); error -> halt(1) end.'
+clean:
+	@./rebar clean
 
-clean: 
-	@echo "removing:"
-	@rm -fv ebin/*.beam
+docs:
+	@./rebar doc	 

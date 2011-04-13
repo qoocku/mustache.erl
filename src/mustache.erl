@@ -1,6 +1,5 @@
-%% The MIT License
-%% 
-%% Copyright (c) 2009 Tom Preston-Werner <tom@mojombo.com>
+%% @doc Mustche Template Rendering Engine.
+%% == The MIT License ==
 %% 
 %% Permission is hereby granted, free of charge, to any person obtaining a copy
 %% of this software and associated documentation files (the "Software"), to deal
@@ -19,18 +18,35 @@
 %% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
-
-%% See the README at http://github.com/mojombo/mustache.erl for additional
-%% documentation and usage examples.
+%%
+%% == User Guide ==
+%%
+%% See the README at [http://github.com/mojombo/mustache.erl] for additional
+%% documentation and usage examples or the overview.
+%%
+%% @copyright 2009 Tom Preston-Werner <tom@mojombo.com>
 
 -module(mustache).  %% v0.1.0
 -author("Tom Preston-Werner").
--export([compile/1, compile/2, render/1, render/2, render/3, get/2, get/3, escape/1, start/1]).
+-author("Damian T. Dobroczy\\'nski <qoocku@gmail.com>").
+-export([compile/1, compile/2, compile/3,
+         render/1, render/2, render/3, render/4,
+         get/2, get/3, escape/1, start/1]).
 
 -record(mstate, {mod = undefined,
                  section_re = undefined,
                  tag_re = undefined}).
 
+%% @doc Returns compiled template.
+%%      You may pass the template contents as is or pass a module name
+%%      which path basename will provide the template filename (the template
+%%      should have ".mustache" extension).
+
+-type ctempl () :: function(). % Compiled template.
+-spec compile (list() | binary() | module()) -> ctempl().
+
+compile(Body) when is_binary(Body) ->
+  compile(erlang:binary_to_list(Body));
 compile(Body) when is_list(Body) ->
   State = #mstate{},
   CompiledTemplate = pre_compile(Body, State),
@@ -41,14 +57,30 @@ compile(Body) when is_list(Body) ->
   Bindings = erl_eval:new_bindings(),
   {value, Fun, _} = erl_eval:expr(Form, Bindings),
   Fun;
-compile(Mod) ->
+compile(Mod) when is_atom(Mod) ->
   TemplatePath = template_path(Mod),
   compile(Mod, TemplatePath).
 
-compile(Mod, File) ->
+%% @doc Returns compiled template which filename is explicity given.
+
+-spec compile (module(), string()) -> ctempl().
+
+compile(Mod, File) when is_atom(Mod)
+                        andalso is_list(File) ->
+  compile(Mod, fun file:read_file/1, File).
+
+%% @doc Returns compiled template which contents is read by the file reader.
+%%      The file reader SHOULD use provided template id to get its contents.
+
+-type template_id () :: any(). % Id of a template (which may be a filename).
+-type file_reader () :: fun ((template_id()) -> {ok, list() | binary()}). % Function that reads a template "file".
+-spec compile (module(), file_reader(), template_id()) -> ctempl().
+
+compile(Mod, FileReader, TemplateId) when is_atom(Mod)
+                                    andalso is_function(FileReader) ->
   code:purge(Mod),
   code:load_file(Mod),
-  {ok, TemplateBin} = file:read_file(File),
+  {ok, TemplateBin} = FileReader(TemplateId),
   Template = re:replace(TemplateBin, "\"", "\\\\\"", [global, {return,list}]),
   State = #mstate{mod = Mod},
   CompiledTemplate = pre_compile(Template, State),
@@ -60,24 +92,72 @@ compile(Mod, File) ->
   {value, Fun, _} = erl_eval:expr(Form, Bindings),
   Fun.
 
-render(Mod) ->
+%% @doc Renders the template referenced by the module name. The default context
+%%      is empty.
+%% @see render/2
+
+-spec render (module()) -> string().
+
+render(Mod) when is_atom(Mod) ->
   TemplatePath = template_path(Mod),
   render(Mod, TemplatePath).
 
-render(Body, Ctx) when is_list(Body) ->
+%% @doc Renders a template body (given explicity or as a filename
+%%       or using a file reader) using provided context.
+%% @see compile/3
+%% @see render/3
+%% @see render/4
+
+-type tbody () :: binary() | list(). % Template contents.
+-type ctx   () :: dict(). % Rendering context.
+-spec render (tbody(), ctx()) -> string();
+             (module(), string()) -> string();
+             (module(), {reader, file_reader()}) -> string();
+             (module(), ctempl()) -> string().
+
+render(Body, Ctx) when is_list(Body) orelse is_binary(Body) ->
   TFun = compile(Body),
   render(undefined, TFun, Ctx);
-render(Mod, File) when is_list(File) ->
-  render(Mod, File, dict:new());
-render(Mod, CompiledTemplate) ->
+render(Mod, File) when is_atom(Mod)
+                       andalso is_list(File) ->
+  render(Mod, {reader, fun file:read_file/1}, File, dict:new());
+render(Mod, {reader, FileReader}) when is_atom(Mod)
+                             andalso is_function(FileReader) ->
+  render(Mod, FileReader, template_path(Mod), dict:new());
+render(Mod, CompiledTemplate) when is_atom(Mod)
+                                   andalso is_function(CompiledTemplate) ->
   render(Mod, CompiledTemplate, dict:new()).
 
-render(Mod, File, Ctx) when is_list(File) ->
-  CompiledTemplate = compile(Mod, File),
-  render(Mod, CompiledTemplate, Ctx);
-render(Mod, CompiledTemplate, Ctx) ->
+%% @doc Renders a template referenced by a module name using file reader
+%%      and a context.
+%% @see render/4
+
+-spec render (module(), {reader, file_reader()}, ctx()) -> string();
+             (module(), ctempl(), dict()) -> string().
+
+render(Mod, {reader, FileReader}, Ctx) when is_atom(Mod) 
+                                        andalso is_function(FileReader) ->
+  render(Mod, FileReader, template_path(Mod), Ctx);
+render(Mod, CompiledTemplate, Ctx) when is_atom(Mod) 
+                                        andalso is_function(CompiledTemplate) ->
   Ctx2 = dict:store('__mod__', Mod, Ctx),
   lists:flatten(CompiledTemplate(Ctx2)).
+
+%% @doc Renders a template referenced by a module name. The template content
+%%      is provided by a file reader which uses the template id to get the
+%%      content. The context is explicit given.
+%% @equiv render(Mod, compile(Mod, FileReader, TemplateId), Ctx)
+%% @see compile/3
+%% @see render/3
+
+-spec render (module(), file_reader(), template_id(), ctx()) -> string().
+
+render(Mod, FileReader, TemplateId, Ctx) when is_atom(Mod) 
+                                              andalso is_function(FileReader) ->
+  CompiledTemplate = compile(Mod, FileReader, TemplateId),
+  render(Mod, CompiledTemplate, Ctx).
+
+%% =============== local functions =====================
 
 pre_compile(T, State) ->
   SectionRE = "\{\{\#([^\}]*)}}\s*(.+?){{\/\\1\}\}\s*",
@@ -154,12 +234,16 @@ template_path(Mod) ->
   ModPath = code:which(Mod),
   re:replace(ModPath, "\.beam$", ".mustache", [{return, list}]).
 
+%% @private
+
 get(Key, Ctx) when is_list(Key) ->
   {ok, Mod} = dict:find('__mod__', Ctx),
   get(list_to_atom(Key), Ctx, Mod);
 get(Key, Ctx) ->
   {ok, Mod} = dict:find('__mod__', Ctx),
   get(Key, Ctx, Mod).
+
+%% @private
 
 get(Key, Ctx, Mod) when is_list(Key) ->
   get(list_to_atom(Key), Ctx, Mod);
@@ -197,8 +281,12 @@ to_s(Val) when is_atom(Val) ->
 to_s(Val) ->
   Val.
 
+%% @private
+
 escape(HTML) ->
   escape(HTML, []).
+
+%% @private
 
 escape([], Acc) ->
   lists:reverse(Acc);
@@ -212,6 +300,8 @@ escape([X | Rest], Acc) ->
   escape(Rest, [X | Acc]).
 
 %%---------------------------------------------------------------------------
+
+%% @private
 
 start([T]) ->
   Out = render(list_to_atom(T)),
