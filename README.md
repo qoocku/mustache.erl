@@ -173,7 +173,7 @@ usage is like this (storing templates in Mnesia `template` table):
              end,
     mustache:render(simple, {reader, Reader})
 
-(note that `TemplateId' would be equal to `"<path>/ebin/simple.mustache"` so it should be better to convert it to something more nicer). You may also use a context dictionary:
+(note that `TemplateId` would be equal to `"<path>/ebin/simple.mustache"` so it should be better to convert it to something more nicer). You may also use a context dictionary:
 
     mustache:render(simple, {reader, Reader}, Ctx)
 
