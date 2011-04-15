@@ -33,6 +33,8 @@
          render/1, render/2, render/3, render/4,
          get/2, get/3, escape/1, start/1]).
 
+-export([ctx_file_reader/1]).
+
 -record(mstate, {mod = undefined,
                  section_re = undefined,
                  tag_re = undefined}).
@@ -73,7 +75,7 @@ compile(Mod, File) when is_atom(Mod)
 %%      The file reader SHOULD use provided template id to get its contents.
 
 -type template_id () :: any(). % Id of a template (which may be a filename).
--type file_reader () :: fun ((template_id()) -> {ok, list() | binary()}). % Function that reads a template "file".
+-type file_reader () :: fun ((template_id()) -> {ok, list() | binary()}). % Function that reads a template or context "file".
 -spec compile (module(), file_reader(), template_id()) -> ctempl().
 
 compile(Mod, FileReader, TemplateId) when is_atom(Mod)
@@ -109,7 +111,7 @@ render(Mod) when is_atom(Mod) ->
 %% @see render/4
 
 -type tbody () :: binary() | list(). % Template contents.
--type ctx   () :: dict(). % Rendering context.
+-type ctx   () :: dict() | ctx_file | {ctx_reader, fun(() -> dict() | [{atom(), string()}])}. % Rendering context.
 -spec render (tbody(), ctx()) -> string();
              (module(), string()) -> string();
              (module(), {reader, file_reader()}) -> string();
@@ -121,23 +123,50 @@ render(Body, Ctx) when is_list(Body) orelse is_binary(Body) ->
 render(Mod, File) when is_atom(Mod)
                        andalso is_list(File) ->
   render(Mod, {reader, fun file:read_file/1}, File, dict:new());
+render(Mod, ctx_file) when is_atom(Mod) ->
+  render(Mod, {ctx_reader, fun ?MODULE:ctx_file_reader/1});
+render(Mod, {ctx_reader, CtxReader}) when is_atom(Mod)
+                                          andalso is_function(CtxReader) ->
+  {ok, Props} = CtxReader(Mod),
+  render(Mod, dict:from_list(Props));
 render(Mod, {reader, FileReader}) when is_atom(Mod)
                              andalso is_function(FileReader) ->
   render(Mod, FileReader, template_path(Mod), dict:new());
 render(Mod, CompiledTemplate) when is_atom(Mod)
                                    andalso is_function(CompiledTemplate) ->
-  render(Mod, CompiledTemplate, dict:new()).
+  render(Mod, CompiledTemplate, dict:new());
+render(Mod, Ctx) when is_atom(Mod) ->
+  render(Mod, template_path(Mod), Ctx).
 
 %% @doc Renders a template referenced by a module name using file reader
 %%      and a context.
 %% @see render/4
 
 -spec render (module(), {reader, file_reader()}, ctx()) -> string();
-             (module(), ctempl(), dict()) -> string().
+             (module(), string(), ctx()) -> string();
+             (module(), ctempl(), ctx()) -> string().
 
+render(Mod, FileName, ctx_file) when is_atom(Mod) andalso is_list(FileName) ->
+  render(Mod, fun file:read_file/1, FileName, {ctx_reader, fun ?MODULE:ctx_file_reader/1});
+render(Mod, FileName, {ctx_reader, CtxReader}) when is_atom(Mod)
+                                                    andalso is_list(FileName)
+                                                    andalso is_function(CtxReader) ->
+  {ok, Props} = CtxReader(Mod),
+  render(Mod, fun file:read_file/1, FileName, dict:from_list(Props));
+render(Mod, Reader = {reader, FileReader}, ctx_file) when is_atom(Mod) 
+                                                 andalso is_function(FileReader) ->
+  render(Mod, Reader, {ctx_reader, fun ?MODULE:ctx_file_reader/1});
 render(Mod, {reader, FileReader}, Ctx) when is_atom(Mod) 
-                                        andalso is_function(FileReader) ->
+                                            andalso is_function(FileReader) ->
   render(Mod, FileReader, template_path(Mod), Ctx);
+render(Mod, CompiledTemplate, ctx_file) when is_atom(Mod) 
+                                        andalso is_function(CompiledTemplate) ->
+  render(Mod, CompiledTemplate, {ctx_reader, fun ?MODULE:ctx_file_reader/1});
+render(Mod, CompiledTemplate, {ctx_reader, CtxReader}) when is_atom(Mod) 
+                                                            andalso is_function(CompiledTemplate)
+                                                            andalso is_function(CtxReader) ->
+  {ok, Props} = CtxReader(Mod),
+  render(Mod, CompiledTemplate, dict:from_list(Props));
 render(Mod, CompiledTemplate, Ctx) when is_atom(Mod) 
                                         andalso is_function(CompiledTemplate) ->
   Ctx2 = dict:store('__mod__', Mod, Ctx),
@@ -158,6 +187,14 @@ render(Mod, FileReader, TemplateId, Ctx) when is_atom(Mod)
   render(Mod, CompiledTemplate, Ctx).
 
 %% =============== local functions =====================
+
+-spec ctx_file_reader (string()) -> [{atom(), list() | binary()}].
+
+ctx_file_reader (Mod) when is_atom(Mod) ->
+  ctx_file_reader(atom_to_list(Mod));
+ctx_file_reader (Mod) when is_list(Mod) ->
+  {ok, [Props]} = file:consult(Mod ++ ".ctx"),
+  {ok, Props}.
 
 pre_compile(T, State) ->
   SectionRE = "\{\{\#([^\}]*)}}\s*(.+?){{\/\\1\}\}\s*",
