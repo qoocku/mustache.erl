@@ -9,5 +9,8 @@ clean:
 docs:
 	@./rebar doc	 
 
-mustache.erl: compile
+get-deps:
+	@./rebar get-deps
+
+mustache.erl: get-deps compile
 	@./bootstrap
