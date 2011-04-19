@@ -29,17 +29,16 @@
 -module(mustache).  %% v0.1.0
 -author("Tom Preston-Werner").
 -author("Damian T. Dobroczy\\'nski <qoocku@gmail.com>").
+
 -export([compile/1, compile/2, compile/3,
          render/1, render/2, render/3, render/4,
          get/2, get/3, escape/1]).
 
--export([ctx_file_reader/1, section_callback/4]).
+-export([ctx_file_reader/1]).
 
-%-include_lib ("eunit/include/eunit.hrl").
-
--record(mstate, {mod = undefined,
+-record(mstate, {mod        = undefined,
                  section_re = undefined,
-                 tag_re = undefined}).
+                 tag_re     = undefined}).
 
 -type mstate() :: #mstate{}.
 
@@ -127,7 +126,8 @@ render(Body, FileName) when (is_list(Body) orelse is_binary(Body))
                             andalso is_list(FileName) ->
   {ok, [Props]} = file:consult(FileName),
   render(Body, parse_ctx(Props));
-render(Body, Ctx) when is_list(Body) orelse is_binary(Body) ->
+render(Body, Ctx) when (is_list(Body) orelse is_binary(Body))
+                       andalso (not is_atom(Ctx)) ->
   TFun = compile(Body),
   render(undefined, TFun, Ctx);
 render(Mod, File) when is_atom(Mod)
@@ -140,7 +140,7 @@ render(Mod, {ctx_reader, CtxReader}) when is_atom(Mod)
   {ok, Props} = CtxReader(Mod),
   render(Mod, parse_ctx(Props));
 render(Mod, {reader, FileReader}) when is_atom(Mod)
-                             andalso is_function(FileReader) ->
+                                       andalso is_function(FileReader) ->
   render(Mod, FileReader, template_path(Mod), dict:new());
 render(Mod, CompiledTemplate) when is_atom(Mod)
                                    andalso is_function(CompiledTemplate) ->
@@ -207,10 +207,10 @@ render(Mod, FileReader, TemplateId, Ctx) when is_atom(Mod)
 
 -spec ctx_file_reader (string()) -> {ok, [{atom(), list() | binary()}]}.
 
-ctx_file_reader (Mod) when is_atom(Mod) ->
-  ctx_file_reader(atom_to_list(Mod));
 ctx_file_reader (Mod) when is_list(Mod) ->
-  {ok, [Props]} = file:consult(Mod ++ ".ctx"),
+  ctx_file_reader(list_to_existing_atom(Mod));
+ctx_file_reader (Mod) when is_atom(Mod) ->
+  {ok, [Props]} = file:consult(template_path(Mod, ".ctx")),
   {ok, Props}.
 
 -type ctx_list () :: [{atom(), string() | [ctx_list()]}].
@@ -322,9 +322,20 @@ compile_tag("{", Content, #mstate{mod = Mod}) ->
 compile_tag("!", _Content, _State) ->
   "[]".
 
+%% @private
+
+-spec template_path (module()) -> string().
+
 template_path(Mod) ->
+  template_path(Mod, ".mustache").
+
+%% @private
+
+-spec template_path (module(), string()) -> string().
+
+template_path(Mod, Extension) ->
   ModPath = code:which(Mod),
-  re:replace(ModPath, "\.beam$", ".mustache", [{return, list}]).
+  re:replace(ModPath, "\.beam$", Extension, [{return, list}]).
 
 %% @private
 

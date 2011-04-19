@@ -27,11 +27,11 @@ yet where I'd like it to be.
 Installation
 ------------
 
-To compile the code, navigate to the Mustache.erl project root and issue:
+To compile the code and the standalone tool, navigate to the mustache.erl project root and issue:
 
     make
 
-This will produce a `mustache.beam` file in the `ebin` directory that must be
+This will produce a `*.beam` files in the `ebin` directory that must be
 included in the code path of projects that need it.
 
 
@@ -186,7 +186,92 @@ or giving a template id explicity:
 
     mustache:compile(simple, Reader, TemplateId)
 
+Custom Context Reader/Retriever
+-------------------------------
+
+The default way is to use "view" module which eventually is to be
+merged with procided context dict (see above). Additionaly, you may
+specify another waya to obtain the context dict. This is introduced
+mainly to be able to define context values in a file, like the following:
+
+    % This is a file "a_context.ctx"
+    [{planet, "Earth"},
+     {other, [[{name, "Mercury"}],
+              [{name, "Saturn"}, {size, [{value, 100000000}, {description, "huge"}]}],
+              [{name, "Mars"}]]}].
+
+As you see, the file contains an Erlang expression (like in good'n'old
+`*.confg` files) which is a list of `{Key, Value}` pairs where the
+`Value` may be:
+
+* a string
+* a list of list of `{Key, Value}` pairs
+
+so that you may build a tiny, quite simple database of terms providing
+default values for your template tags.
+
+### The retriever
+
+The context retriever is a function accepting one argument (which is
+the module view name, an atom) which should get a context list from
+somewhere and returns it in for of `{ok, List}`. By the default
+`file:consult/1` is used (with a minor tweak). 
+
+You pass the retriver function in form of a pair `{ctx_reader, Fun}`
+in this places where `Ctx` dictionary typically is used. If your context files
+are in `*beam` files directory and have the same name as the view
+module, you may pass `ctx_file` atom. See the examples below.
+
+### Examples of usage
+
+* template given explicit as a string, the default context is read
+  from a file:
+   
+        1> Body = "Hello, {{planet}}.
+                   There are also other planets to say "Hello":
+                   {{#other}}
+                   - {{name}}{{#size}} with size of {{value}} (which is {{description}}){{/size}}
+                   {{/other}}".
+        2> mustache:render(Body, "a_context.ctx").
+
+  which gives you the following output (assumed that `a_context.ctx`
+  is defined as in the upper paragraph):
+  
+        Hello, Earth.
+        There are also other planets to say "Hello":
+
+        - Mercury
+  
+        - Saturn with size of 100000000 (which is huge)
+        
+        - Mars
+
+* template taken from a file referenced by the view module name and
+  the default context is read from a file "a_module.ctx":
+  
+        1> mustache:render(a_module, ctx_file).
+
+  (note, that the default context file has to be available in the
+   module `*.beam` file directory and have `*.ctx` extension).
+  
+* template taken from a custom file and the default context is read
+  from another file:
+  
+        1> mustache:render(a_module, 
+                           {reader, fun (TemplateId) ->
+                                      file:read_file("my-templates/" ++ TemplateId)
+                                    end},
+                           {ctx_reader, fun (TemplateId) ->
+                                          {ok, [C]} = file:consult("my-contexts/" ++ TemplateId),
+                                          {ok, C}
+                                        end}).
+                                                              
+  or:
+  
+        1> mustache:render(a_module, "my_templates/a_module", "my-contexts/a_module").
     
+  or other combinations. See the API docs.
+  
 Tag Types
 ---------
 
@@ -247,6 +332,19 @@ Will render as follows:
 
     <h1>Today.</h1>
 
+`mustache.erl` script
+---------------------
+
+This version comes with a script called `mustache.erl` which is a
+standalone tool (in form of Erlang _escript_ file) which may be used
+to translate any mustache template file onto another format using a
+context defined in a file:
+
+    $> mustache.erl --ctx my-contexts/a_context.ctx my-templates/a_template.mustache
+    
+gives you the rendered template typed onto the terminal screen. The
+option `-o` or `--out` enables the output file. Use the `--help` or
+`-h` option to read the tool command line arguments.
 
 TODO
 ----
