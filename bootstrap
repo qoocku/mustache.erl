@@ -1,0 +1,102 @@
+#!/usr/bin/env escript
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+%% ex: ft=erlang ts=4 sw=4 et
+
+main(Args) ->
+    %% Get a string repr of build time
+    Built = build_time(),
+
+    %% Get a string repr of first matching VCS changeset
+    VcsInfo = vcs_info([{hg, ".hg", "hg identify -i"},
+                        {git, ".git", "git describe --always"}]),
+
+    %% Add check for debug flag
+    DebugFlag = case lists:member("debug", Args) of
+                    true -> debug_info;
+                    false -> undefined
+                end,
+
+    %% Compile all src/*.erl to ebin
+    case make:files(filelib:wildcard("src/*.erl"), [{outdir, "ebin"}, {i, "include"},
+                                                    DebugFlag,
+                                                    {d, 'BUILD_TIME', Built},
+                                                    {d, 'VCS_INFO', VcsInfo}]) of
+        up_to_date ->
+            ok;
+        error ->
+            io:format("Failed to compile mustache.erl files!\n"),
+            halt(1)
+    end,
+
+    %% recompile the deps also
+    os:cmd(filename:join(".", "rebar") ++" compile"),
+
+    %% Make sure file:consult can parse the .app file
+    case file:consult("ebin/mustache.app") of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            io:format("Invalid syntax in ebin/mustache.app: ~p\n", [Reason]),
+            halt(1)
+    end,
+
+    %% Add ebin/ to our path
+    true = code:add_path("ebin"),
+
+    %% Read the contents of the files in ebin; note that we place
+    %% all the beam files at the top level of the code archive so that code loading
+    %% works properly.
+    Files = load_files("*", "ebin") ++ load_files(filename:join(["*", "ebin", "*.beam"]), "deps"),
+
+    case zip:create("mem", Files, [memory]) of
+        {ok, {"mem", ZipBin}} ->
+            %% Archive was successfully created. Prefix that binary with our
+            %% header and write to "rebar" file
+            Script = <<"#!/usr/bin/env escript\n%%! -noshell -noinput -escript main mustache_run\n", ZipBin/binary>>,
+            case file:write_file("mustache.erl", Script) of
+                ok ->
+                    ok;
+                {error, WriteError} ->
+                    io:format("Failed to write mustache.erl script: ~p\n", [WriteError]),
+                    halt(1)
+            end;
+        {error, ZipError} ->
+            io:format("Failed to construct mustache.erl script archive: ~p\n", [ZipError]),
+            halt(1)
+    end,
+
+    %% Finally, update executable perms for our script
+    case os:type() of
+        {unix,_} ->
+            [] = os:cmd("chmod u+x mustache.erl"),
+            ok;
+        _ ->
+            ok
+    end,
+    
+    %% Add a helpful message
+    io:format("Congratulations! You now have a self-contained script called \"mustache.erl\" in\n"
+              "your current working directory. Place this script anywhere in your path\n"
+              "and you can use it to transform any mustache template onto another format.\n").
+
+build_time() ->
+    {{Y, M, D}, {H, Min, S}} = calendar:now_to_universal_time(now()),
+    lists:flatten(io_lib:format("~4..0w~2..0w~2..0w_~2..0w~2..0w~2..0w", [Y, M, D, H, Min, S])).
+
+
+load_files(Wildcard, Dir) ->
+    [read_file(Filename, Dir) || Filename <- filelib:wildcard(Wildcard, Dir)].
+
+read_file(Filename, Dir) ->
+    {ok, Bin} = file:read_file(filename:join(Dir, Filename)),
+    {Filename, Bin}.
+
+vcs_info([]) ->
+    "No VCS info available.";
+vcs_info([{Id, Dir, Cmd} | Rest]) ->
+    case filelib:is_dir(Dir) of
+        true ->
+            lists:concat([Id, " ", string:strip(os:cmd(Cmd), both, $\n)]);
+        false ->
+            vcs_info(Rest)
+    end.

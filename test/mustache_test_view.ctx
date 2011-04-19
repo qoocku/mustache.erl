@@ -1,1 +1,4 @@
-[{planet, "Earth"}].
+[{planet, "Earth"},
+ {other, [[{name, "Mercury"}],
+          [{name, "Saturn"}, {size, [{value, 100000000}, {description, "huge"}]}],
+          [{name, "Mars"}]]}].
