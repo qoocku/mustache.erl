@@ -190,7 +190,7 @@ Custom Context Reader/Retriever
 -------------------------------
 
 The default way is to use "view" module which eventually is to be
-merged with procided context dict (see above). Additionaly, you may
+merged with provided context dict (see above). Additionaly, you may
 specify another waya to obtain the context dict. This is introduced
 mainly to be able to define context values in a file, like the following:
 
@@ -205,6 +205,7 @@ As you see, the file contains an Erlang expression (like in good'n'old
 `Value` may be:
 
 * a string
+* a list of `{Key, Value}` pairs
 * a list of list of `{Key, Value}` pairs
 
 so that you may build a tiny, quite simple database of terms providing
@@ -226,14 +227,14 @@ module, you may pass `ctx_file` atom. See the examples below.
 
 * template given explicit as a string, the default context is read
   from a file:
-   
+  
         1> Body = "Hello, {{planet}}.
                    There are also other planets to say "Hello":
                    {{#other}}
                    - {{name}}{{#size}} with size of {{value}} (which is {{description}}){{/size}}
                    {{/other}}".
         2> mustache:render(Body, "a_context.ctx").
-
+  
   which gives you the following output (assumed that `a_context.ctx`
   is defined as in the upper paragraph):
   
@@ -250,7 +251,7 @@ module, you may pass `ctx_file` atom. See the examples below.
   the default context is read from a file "a_module.ctx":
   
         1> mustache:render(a_module, ctx_file).
-
+  
   (note, that the default context file has to be available in the
    module `*.beam` file directory and have `*.ctx` extension).
   
@@ -264,12 +265,12 @@ module, you may pass `ctx_file` atom. See the examples below.
                            {ctx_reader, fun (TemplateId) ->
                                           {ok, [C]} = file:consult("my-contexts/" ++ TemplateId),
                                           {ok, C}
-                                        end}).
-                                                              
+                                        end}).                                          
+                                        
   or:
   
-        1> mustache:render(a_module, "my_templates/a_module", "my-contexts/a_module").
-    
+        1> mustache:render(a_module, "my_templates/a_module", "my-contexts/a_module").    
+  
   or other combinations. See the API docs.
   
 Tag Types
