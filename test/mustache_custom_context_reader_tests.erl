@@ -17,4 +17,9 @@ all_test_ () ->
   Result    = mustache:render(mustache_test_view, {ctx_reader, CtxReader}),
   ?assertEqual(mustache_test_view:result("Hello, {{planet}}"), Result).
   
+'test custom context file with custom template file' (_) ->
+  Result    = mustache:render(mustache_test_view,
+                              "mustache_test_view.mustache",
+                              "mustache_test_view.ctx"),
+  ?assertEqual(mustache_test_view:result("Hello, {{planet}}"), Result).
   

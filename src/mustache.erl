@@ -153,9 +153,17 @@ render(Mod, Ctx) when is_atom(Mod) ->
 %% @see render/4
 
 -spec render (module(), {reader, file_reader()}, ctx()) -> string();
+             (module(), string(), string()) -> string();
              (module(), string(), ctx()) -> string();
              (module(), ctempl(), ctx()) -> string().
 
+render(Mod, FileName, CtxFile) when is_atom(Mod)
+                                    andalso is_list(FileName)
+                                    andalso is_list(CtxFile) ->
+  render(Mod, FileName, {ctx_reader, fun (_) ->
+                                         {ok, [C]} = file:consult(CtxFile),
+                                         {ok, C}
+                                     end});
 render(Mod, FileName, ctx_file) when is_atom(Mod) andalso is_list(FileName) ->
   render(Mod, FileName, {ctx_reader, fun ?MODULE:ctx_file_reader/1});
 render(Mod, FileName, {ctx_reader, CtxReader}) when is_atom(Mod)
